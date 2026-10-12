@@ -11,6 +11,7 @@ const { buildNodeStatusList } = require('../src/routes/nodes');
 const KEY = '00'.repeat(32);
 const GENERATION = '0102030405060708';
 const FRAME = 'RkdVMQEBAgMEBQYHCAAAAAAAAAABJDAr4zmL8EXLXhFBdM+NQh5n7H83ysJbKuckZFWdiFtL6ilarl3lGfpynmNTg6eP5mQv2zvy9m5FhDv/mRl65uiWS50zhvgltJGM1keYQ7g5FJ19Lw==';
+const COMPACT_FRAME = 'RkdVMQEBAgMEBQYHCAAAAAAAAAABXhJe7QkFmBLnBGD0nkP+SLduZG26W3lrwSE=';
 
 test('fixed slots reject ambiguous or out-of-range identities', () => {
   assert.equal(nodeIdForSlot(1), 'NODE01');
@@ -103,14 +104,18 @@ test('ingestion atomically consumes a sequence once and rejects archived credent
   Alert.findOne = () => ({ sort: async () => null });
   Alert.updateMany = async () => ({ modifiedCount: 0 });
   try {
-    const outcomes = await Promise.allSettled([
-      handlePacket({ frame: FRAME, rssi: -60, snr: 8 }),
-      handlePacket({ frame: FRAME, rssi: -60, snr: 8 })
-    ]);
-    assert.equal(outcomes.filter((value) => value.status === 'fulfilled').length, 1);
-    assert.equal(outcomes.find((value) => value.status === 'rejected').reason.status, 409);
-    assert.equal(readings, 1);
-    assert.equal(node.uplink_sequence, 1);
+    for (const frame of [FRAME, COMPACT_FRAME]) {
+      node.uplink_sequence = 0;
+      readings = 0;
+      const outcomes = await Promise.allSettled([
+        handlePacket({ frame, rssi: -60, snr: 8 }),
+        handlePacket({ frame, rssi: -60, snr: 8 })
+      ]);
+      assert.equal(outcomes.filter((value) => value.status === 'fulfilled').length, 1);
+      assert.equal(outcomes.find((value) => value.status === 'rejected').reason.status, 409);
+      assert.equal(readings, 1);
+      assert.equal(node.uplink_sequence, 1);
+    }
     node.registration_status = 'archived';
     await assert.rejects(handlePacket({ frame: FRAME }), { status: 401 });
     assert.equal(readings, 1);

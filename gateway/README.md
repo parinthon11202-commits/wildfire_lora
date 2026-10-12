@@ -70,10 +70,18 @@ installation's source configuration.
 Install WiFiManager version 2.0.17 or newer from Arduino Library Manager before
 compiling the Gateway.
 
-The Gateway does not keep a fixed-size node table. It posts every received node
-packet directly to `POST /api/packets` using the private gateway key.
-Backend and MongoDB store each sensor packet as a reading and manage current
-node status and offline detection. Repeated packets create repeated readings.
+The FG1 Gateway keeps a registry of up to ten active slots, synchronized over
+authenticated HTTPS. It verifies the generation, AES-GCM authentication and
+sequence before queuing the original frame for `POST /api/packets`.
+Compact sensor frames are 47 bytes at SF10/BW125 kHz; both Gateway and nodes
+must be upgraded to the same radio settings. See [the wire/retry specification](../docs/FG1_COMPACT_RADIO.md).
+An identical retry of the latest queued exchange within 60 seconds receives
+the identical cached encrypted reply, without another HTTP queue entry.
+Backend also atomically rejects a sequence already consumed, so a radio retry
+does not create another Reading. The reply cache is RAM-only and lost on reset;
+the durable sequence watermark remains in NVS. ACK means authenticated and
+queued, not committed to MongoDB. Existing HTTP upload failures are not retried
+by this radio change.
 No computer or COM port is needed at the gateway site.
 
 ## GPS Re-acquire Command

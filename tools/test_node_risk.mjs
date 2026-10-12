@@ -2,7 +2,7 @@
 // Set CLANGXX to a clang++ with wasm-ld; no board, network, or sensor is required.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { compileWasm } from './compile_wasm.mjs'
 import assert from 'node:assert/strict'
 
 const root = resolve(import.meta.dirname, '..')
@@ -16,6 +16,7 @@ const sharedSource = [
   'node_state.h',
   'sensor_reading.h',
   'risk_rules.h',
+  'power_management.h',
   'lora_transport.h',
   'node_app.h'
 ].map((file) => readFileSync(resolve(root, 'sensor_common', file), 'utf8')).join('\n')
@@ -24,11 +25,12 @@ const sharedConfig = readFileSync(resolve(root, 'sensor_common', 'sensor_config.
 const names = [
   'evaluateRawRisk',
   'applyStateLatch',
-  'evaluateFireStatus'
+  'evaluateFireStatus',
+  'plannedReportIntervalSeconds'
 ]
 
 function extract(source, name) {
-  const match = source.match(new RegExp('^\\w+ ' + name + '\\([^]*?^}', 'm'))
+  const match = source.match(new RegExp('^(?:\\w+ )+' + name + '\\([^]*?^}', 'm'))
   assert.ok(match, 'Missing function: ' + name)
   return match[0]
 }
@@ -46,12 +48,13 @@ for (const sketch of ['sensor_node', 'sensor_node_2']) {
     'Each Arduino sketch must show loop() and one measurement cycle')
   assert.match(sharedSource, /void setupNode\(\)/,
     'Shared application module must provide setupNode()')
-  assert.match(nodeConfig, new RegExp('#define NODE_ID "NODE0[12]"'))
+  assert.match(nodeConfig, /^#define NODE_ID "NODE(?:0[1-9]|10)"$/m,
+    'Legacy node identity is installation-specific; preserve its configured slot')
   assert.match(nodeConfig, /sensor_common\/sensor_config\.h/,
     'Each node must load the shared sensor configuration')
-  assert.match(source, /if \(status == WATCH\) return 120UL/)
+  assert.match(source, /if \(status == WATCH\) return 40UL/)
   assert.match(source, /if \(status == WARNING\) return 20UL/)
-  assert.match(source, /return 300UL/)
+  assert.match(source, /return 60UL/)
   assert.match(source, /data\.particleAdc = readParticleMedianAdc\(\)/,
     'Each measurement cycle must use the median of three smoke readings')
   assert.doesNotMatch(source, /doc\["rb"\]/,
@@ -78,6 +81,7 @@ for (const sketch of ['sensor_node', 'sensor_node_2']) {
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
 #define RTC_DATA_ATTR
 ${types}
 ${latchState[0]}
@@ -88,7 +92,16 @@ int readSharpOnce() { return samples[readIndex++]; }
 void delay(int) {}
 ${smokeFunction}
 ${functions}
+uint32_t clockMs;
+unsigned long millis() { return clockMs; }
+${extract(source, 'remainingIntervalMs')}
 extern "C" {
+unsigned interval(int status) { return plannedReportIntervalSeconds((FireStatus)status); }
+unsigned remaining(int status, unsigned elapsed, int wrap) {
+  const unsigned start = wrap ? 4294967000U : 0;
+  clockMs = start + elapsed;
+  return remainingIntervalMs((FireStatus)status, start);
+}
 int smoke(int a, int b, int c) {
   samples[0] = a; samples[1] = b; samples[2] = c;
   readIndex = 0;
@@ -108,11 +121,7 @@ int raw(float temp, float humidity, int particle) {
   const input = resolve(output, sketch + '.cpp')
   const binary = resolve(output, sketch + '.wasm')
   writeFileSync(input, cpp)
-  const compiled = spawnSync(compiler, [
-    '--target=wasm32', '-O2', '-nostdlib',
-    '-Wl,--no-entry', '-Wl,--export-all', input, '-o', binary
-  ], { encoding: 'utf8' })
-  assert.equal(compiled.status, 0, compiled.error?.message || compiled.stderr)
+  compileWasm(compiler, input, binary)
 
   const { instance } = await WebAssembly.instantiate(readFileSync(binary))
   const api = instance.exports
@@ -120,6 +129,14 @@ int raw(float temp, float humidity, int particle) {
   const run = (t = 30, h = 70, p = 20) => api.run(t, h, p)
 
   // Enum: NORMAL=0, WATCH=1, WARNING=2, SENSOR_FAULT=3.
+  for (const [status, seconds] of [[0, 60], [1, 40], [2, 20], [3, 60]]) {
+    assert.equal(api.interval(status), seconds, 'Current measurement/report interval')
+    assert.equal(api.remaining(status, 5000, 0), seconds * 1000 - 5000,
+      'Sensor/TX/ACK time is subtracted instead of adding a full sleep interval')
+    assert.equal(api.remaining(status, 5000, 1), seconds * 1000 - 5000,
+      'Measurement interval survives clock rollover')
+    assert.equal(api.remaining(status, seconds * 1000, 0), 0, 'Completed cycle has no extra wait')
+  }
   assert.equal(raw(35, 50, 300), 0, 'All inclusive NORMAL boundaries stay NORMAL')
   assert.equal(raw(35.01, 50, 300), 1, 'Temperature above 35 enters WATCH')
   assert.equal(raw(35, 49.99, 300), 1, 'Humidity below 50 enters WATCH')
@@ -151,5 +168,5 @@ int raw(float temp, float humidity, int particle) {
   assert.equal(api.smokeReads(), 3, 'Smoke sensor is read exactly three times')
   assert.equal(api.smoke(900, 100, 110), 110, 'Median does not depend on reading order')
 
-  console.log(`${sketch}: C++ risk thresholds passed`)
+  console.log(`${sketch}: C++ risk thresholds and 60/40/20/60-second cycles passed`)
 }

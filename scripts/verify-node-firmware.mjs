@@ -10,6 +10,7 @@ assert.ok(lstatSync(manifestFile).size < 16384)
 const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
 assert.equal(manifest.name, 'ForestGuard FG1 LILYGO LoRa32 433')
 assert.equal(manifest.protocol, 'FG1')
+assert.equal(manifest.version, '1.2.1')
 assert.equal(manifest.board_fqbn, 'esp32:esp32:ttgo-lora32:FlashFreq=40')
 assert.equal(manifest.builds.length, 1)
 assert.equal(manifest.builds[0].chipFamily, 'ESP32')
@@ -29,7 +30,7 @@ for (const [index, [name, offset, maximum]] of expected.entries()) {
   const bytes = readFileSync(file)
   for (const algorithm of ['sha256', 'md5']) assert.equal(createHash(algorithm).update(bytes).digest('hex'), part[algorithm])
   if (index === 0 || index === 3) assert.equal(bytes[0], 0xe9)
-  if (index === 3) for (const marker of ['FG1_READY', 'fg_provision', 'fg_provisioned']) assert.ok(bytes.includes(marker))
+  if (index === 3) for (const marker of ['FG1_READY', 'fg_provision', 'fg_provisioned', 'FG1_COMPACT_SF10']) assert.ok(bytes.includes(marker))
 }
 const html = readFileSync(join(root, 'index.html'), 'utf8')
 const asset = html.match(/src="(\/assets\/[A-Za-z0-9._-]+\.js)"/)[1]

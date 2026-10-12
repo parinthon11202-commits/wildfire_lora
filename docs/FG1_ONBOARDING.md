@@ -1,5 +1,11 @@
 # FG1: ใช้บอร์ดเดิม เพิ่มการยืนยันตัวตนและจัดการ NODE01–NODE10
 
+Backend compact และเว็บพร้อมเฟิร์มแวร์โหนด 1.2.1 deploy VM แล้ววันที่ 12 ตุลาคม 2569
+ตรวจ API HTTP 200, checksum เฟิร์มแวร์ทั้งสี่ไฟล์ และ Cloudflare Access หน้า Admin แล้ว
+ยังไม่ได้ flash โหนด/Gateway; การเปลี่ยนรอบ 60/40/20/60 วินาทีมีผลหลังติดตั้งเฟิร์มแวร์ใหม่บนโหนด
+ดู [FG1 compact radio](FG1_COMPACT_RADIO.md) สำหรับแพ็กเก็ต 47 ไบต์และนโยบายส่งซ้ำ
+สถานะด้านล่างเป็นบันทึกของรุ่นก่อน ไม่ใช่ผลตรวจระบบที่ deploy ในรอบแก้ไขนี้
+
 สถานะ ณ 1 ตุลาคม 2569: Backend / Dashboard FG1 deploy บน VM แล้ว (`api_version: 3`)
 ทดสอบ Backend 24 รายการในรอบก่อน; Dashboard ล่าสุด 16 รายการ และ TypeScript / production build ผ่าน
 ตรวจจากเครื่องผู้ใช้แล้ว: Dashboard HTTP 200, API / MongoDB พร้อม และ master key สำหรับลงทะเบียนตั้งค่าแล้ว
@@ -54,9 +60,10 @@ FG1 เป็น application protocol เฉพาะโครงงาน ใ�
 ไม่ใช่ primitive เข้ารหัสที่เขียนเอง และไม่ใช่โปรโตคอลที่ผ่าน LoRaWAN certification
 
 เฟรม: direction 4 bytes (`FGU1` uplink / `FGD1` reply), slot 1, generation 8,
-sequence big-endian 8, encrypted JSON, GCM authentication tag 16
+sequence big-endian 8, encrypted payload, GCM authentication tag 16
 header 21 bytes เป็น AAD; nonce = direction 4 + sequence 8; max frame 255 bytes
-JSON plaintext ไม่เกิน 218 bytes และ `id` ต้องตรงกับ slot ใน header
+sensor plaintext เป็น compact binary 10 bytes; reply ปกติ 3 bytes
+GPS / cmd_ack ยังเป็น JSON plaintext ไม่เกิน 218 bytes และ `id` ต้องตรงกับ slot ใน header
 Gateway ส่งเฟรมเดิมแบบ base64 ไป Backend พร้อม RSSI/SNR; Backend ตรวจ GCM ซ้ำเอง
 ไม่มี fallback รับ JSON ไม่ยืนยันตัวตน และไม่มี auto-upsert โหนดที่ไม่ลงทะเบียน
 
@@ -64,15 +71,19 @@ key 32 bytes และ generation 8 bytes สุ่มใหม่เมื่�
 โหนด reserve counter เป็นช่วง 256 ก่อนส่ง บันทึกลง NVS แบบหนึ่ง blob และใช้ RTC ข้าม deep sleep
 cold reset ข้ามช่วงที่ reserve ไว้ จึงไม่ใช้ nonce เดิม; NVS เขียนไม่ได้จะไม่ส่ง
 Gateway เก็บ high-watermark ต่อ slot/generation ลง NVS ก่อน ACK และ Backend ใช้ atomic CAS ใน MongoDB
-downlink เป็น **หนึ่ง reply ต่อหนึ่ง uplink** รวม ACK กับคำสั่ง เพื่อไม่ใช้ GCM nonce เดิมกับข้อความต่างกัน
+downlink สร้าง **หนึ่ง ciphertext ต่อหนึ่ง uplink** รวม ACK กับคำสั่ง; การตอบซ้ำใช้ไบต์เดิมจาก cache
+เพื่อไม่ใช้ GCM nonce เดิมกับข้อความต่างกัน
 โหนดรับเฉพาะ reply ของ generation และ sequence ที่เพิ่งส่ง และรับได้ครั้งเดียวในรอบนั้น
 รองรับ **Gateway ที่ไว้ใจหนึ่งตัวเท่านั้น**; หลาย Gateway ต้องออกแบบ key/nonce domains ใหม่ก่อน
 ช่วงรับของ managed node สูงสุด 6 วินาทีหลังส่ง ถ้าได้ ACK ที่ตรวจยืนยัน key/generation/sequence/id และ a=1 จะจบรอทันที
 จัดการคำสั่งที่แนบมากับ reply และส่ง cmd_ack ก่อนปิดวิทยุ; GPS uplink จบรอเมื่อได้ reply ที่ถูกต้องแม้ a=0
-ACK ผิด/ไม่มี ACK ไม่จบรอก่อนเวลา และไม่เพิ่ม retry; ที่ SF12 ต้องทดสอบเวลาส่ง reply จริงว่าเสร็จภายใน 6 วินาที
+ACK ผิด/ไม่มี ACK ไม่จบรอก่อนเวลา; sensor ลองซ้ำรวมไม่เกิน 3 ครั้ง ใช้เฟรม/sequence เดิมและสุ่มรอใหม่
+ทุกครั้งตรวจเวลาเหลือในรอบ ถ้าไม่พอสำหรับ TX + RX 6 วินาที + ตอบคำสั่ง จะไม่เริ่มส่งครั้งนั้น
+SF10 ต้องตรงกันทั้งสองฝั่ง; GPS และ cmd_ack ไม่ได้เพิ่มการลองซ้ำสามครั้ง
 เมื่อจบรอจะกลับสู่ลูปเดิม: NORMAL/WATCH ที่ไม่มีงาน GPS ค้างเข้าสู่ deep sleep ส่วน WARNING/การค้น GPS ยังตื่นต่อ
 ตรวจลูป C++ ด้วย `node tools/test_node_ack.mjs` (ใช้ clang++/wasm-ld ชุดเดียวกับ test_node_risk); ไม่ใช่การทดสอบคลื่นจริง
-รอบ WARNING เป้าหมาย 20 วินาทีอาจทำไม่ได้เมื่อรวม airtime/random delay ต้องวัดจริง ไม่กล่าวอ้างคาบที่ยังไม่ทดสอบ
+ตรวจ compact/retry/cache ด้วย `node tools/test_compact_radio.mjs`; ไม่ใช่การทดสอบคลื่นจริง
+รอบ WARNING จำกัดเวลาเริ่ม exchange ตามงบ 20 วินาที แต่ต้องวัดเวลาจริงและไม่รับประกันส่งถึงครบทุกโหนด
 
 `GATEWAY_API_KEY` เดิมยังยืนยัน Gateway ↔ Backend ผ่าน HTTPS
 Backend ต้องเพิ่ม `DEVICE_REGISTRY_KEY` เป็น random 32 bytes (64 lowercase hex) แยกจาก key เดิม
@@ -113,7 +124,7 @@ ACK ยืนยันว่า Gateway ตรวจแล้วและเข�
 6. รีเซ็ต/ตัดไฟ node และ Gateway แล้วส่งเฟรมเก่า; ต้องไม่มี nonce ซ้ำและไม่บันทึกข้อมูลซ้ำ
 7. ลบ NODE01 แล้วทดสอบ key เก่า; คืนเลข 1 แล้วตรวจ _id/history เดิม, key ใหม่, online=false จนมีข้อมูลใหม่
 8. ทดสอบสอง Admin ทำงานพร้อมกันและ packets ที่เข้าระหว่าง delete/restore
-9. ทดสอบ GPS downlink/ACK และ SF12 WARNING หลายโหนด พร้อมจับเวลาจริง
+9. ทดสอบ GPS downlink/ACK และ SF10 WARNING หลายโหนด พร้อมจับเวลาจริง
 10. ตรวจว่า public APIs/logs/localStorage ไม่มี secret และ key sync cache หมดอายุเมื่อ server หาย
 
 ## Migration / backup / rollback

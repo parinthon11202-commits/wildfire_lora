@@ -107,15 +107,15 @@ String buildGpsPacket(const GpsLocation &fix, bool gpsFix, const char *errorCode
 }
 
 // sendGpsLocationPackets: สร้างและส่งแพ็กเก็ตพิกัดหนึ่งครั้ง
-void sendGpsLocationPackets(const GpsLocation &fix) {
+bool sendGpsLocationPackets(const GpsLocation &fix) {
   String payload = buildGpsPacket(fix, true, "");
-  sendLoRaPacket(payload, true);
+  return sendLoRaPacket(payload, true);
 }
 
 // sendGpsFailedPacket: แจ้ง gps_failed เมื่อค้นไม่สำเร็จ; partialFix ไม่ถูกส่งเป็นพิกัด เพราะ buildGpsPacket ได้ gpsFix=false
-void sendGpsFailedPacket(const GpsLocation &partialFix) {
+bool sendGpsFailedPacket(const GpsLocation &partialFix) {
   String payload = buildGpsPacket(partialFix, false, "gps_failed");
-  sendLoRaPacket(payload, true);
+  return sendLoRaPacket(payload, true);
 }
 
 // resetGpsLocation: ล้างพิกัดและกลับไปเป็นสถานะยังจับ GPS ไม่ได้
@@ -174,16 +174,14 @@ void startGpsReacquisition() {
   Serial.println("GPS re-acquire command accepted");
 }
 
-// sendPendingGpsReports: ส่งรายงาน GPS ที่ปักธงรอไว้ แล้วล้างธง; โค้ดนี้ไม่ได้เก็บรายงานรอส่งใหม่เมื่อการส่งล้มเหลว
+// Keep a pending GPS report when the remaining measurement-cycle budget cannot fit it.
 void sendPendingGpsReports() {
   if (gpsFixReportPending) {
-    gpsFixReportPending = false;
-    sendGpsLocationPackets(nodeGpsLocation);
+    if (sendGpsLocationPackets(nodeGpsLocation)) gpsFixReportPending = false;
   }
 
   if (gpsFailureReportPending) {
-    gpsFailureReportPending = false;
-    sendGpsFailedPacket(gpsWorkingLocation);
+    if (sendGpsFailedPacket(gpsWorkingLocation)) gpsFailureReportPending = false;
   }
 }
 

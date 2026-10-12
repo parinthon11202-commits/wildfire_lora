@@ -2,6 +2,7 @@
 #include <Preferences.h>
 #include <mbedtls/base64.h>
 #include "../radio_common/secure_frame.h"
+#include "../radio_common/reply_cache.h"
 
 struct FgGatewayDevice {
   bool valid;
@@ -13,6 +14,7 @@ struct FgGatewayWatermark { uint8_t generation[8]; uint64_t sequence; };
 FgGatewayDevice fgDevices[10] = {};
 unsigned long fgRegistrySyncedAt = 0;
 bool fgRegistryReady = false;
+FgReplyCache fgReplyCaches[10];
 
 void lockFgDevices() {
 #if WIFI_HTTP_ENABLED
@@ -84,21 +86,53 @@ bool syncFgDevices() {
 bool acceptFgUplink(const uint8_t *frame, size_t length, FgFrameInfo &info,
                     FgGatewayDevice &device, String &payload) {
   if (!fgInspect(frame, length, "FGU1", info)) return false;
+  FgReplyCache &cached = fgReplyCaches[info.slot - 1];
+  const bool exactRetry = fgCachedRequestMatches(cached, frame, length, millis());
   lockFgDevices();
   device = fgDevices[info.slot - 1];
   bool permitted = fgRegistryReady && millis() - fgRegistrySyncedAt < 30000 && device.valid &&
-    !memcmp(device.generation, info.generation, 8) && info.sequence > device.lastSequence;
+    !memcmp(device.generation, info.generation, 8) && (info.sequence > device.lastSequence ||
+      (exactRetry && (cached.queued || info.sequence == device.lastSequence)));
   unlockFgDevices();
-  if (!permitted || !fgDecrypt(frame, length, device.key, "FGU1", info, payload)) return false;
+  if (!permitted) return false;
+  uint8_t plaintext[FG_MAX_FRAME] = {};
+  size_t plaintextLength = 0;
+  if (!fgDecryptBytes(frame, length, device.key, "FGU1", info, plaintext, plaintextLength)) return false;
   StaticJsonDocument<512> doc;
-  if (deserializeJson(doc, payload) || String((const char *)(doc["id"] | "")) != fgNodeId(info.slot)) return false;
+  if (plaintext[0] == FG_SENSOR_KIND) {
+    FgSensorValues sensor;
+    if (!fgDecodeSensor(plaintext, plaintextLength, sensor)) return false;
+    const char *states[] = {"NORMAL", "WATCH", "WARNING", "SENSOR_FAULT"};
+    doc["t"] = "s";
+    doc["id"] = fgNodeId(info.slot);
+    doc["ri"] = sensor.interval;
+    doc["st"] = states[sensor.state];
+    if (sensor.temperature100 == FG_TEMP_MISSING) doc["at"] = nullptr;
+    else doc["at"] = sensor.temperature100 / 100.0;
+    if (sensor.humidity100 == FG_VALUE_MISSING) doc["h"] = nullptr;
+    else doc["h"] = sensor.humidity100 / 100.0;
+    if (sensor.adc == FG_VALUE_MISSING) doc["adc"] = nullptr;
+    else doc["adc"] = sensor.adc;
+    payload = "";
+    serializeJson(doc, payload);
+  } else {
+    // Compatibility is only for authenticated FG1 JSON (GPS, command results,
+    // and pre-upgrade nodes); raw LoRa JSON remains forbidden.
+    if (memchr(plaintext, 0, plaintextLength) ||
+        deserializeJson(doc, plaintext, plaintextLength)) return false;
+    plaintext[plaintextLength] = 0;
+    payload = String((const char *)plaintext);
+  }
+  if (String((const char *)(doc["id"] | "")) != fgNodeId(info.slot)) return false;
   String type = String((const char *)(doc["t"] | ""));
   if (type != "s" && type != "gps" && type != "cmd_ack") return false;
   lockFgDevices();
   FgGatewayDevice &current = fgDevices[info.slot - 1];
   permitted = fgRegistryReady && millis() - fgRegistrySyncedAt < 30000 && current.valid &&
-    !memcmp(current.generation, info.generation, 8) && info.sequence > current.lastSequence;
-  if (permitted) {
+    !memcmp(current.generation, info.generation, 8) && (info.sequence > current.lastSequence ||
+      (exactRetry && (cached.queued || info.sequence == current.lastSequence)));
+  const bool fresh = info.sequence > current.lastSequence;
+  if (permitted && fresh) {
     Preferences prefs;
     permitted = prefs.begin("fg_gateway", false);
     if (permitted) {
@@ -112,6 +146,9 @@ bool acceptFgUplink(const uint8_t *frame, size_t length, FgFrameInfo &info,
     if (permitted) current.lastSequence = info.sequence;
   }
   unlockFgDevices();
+  if (permitted && fresh && (type == "s" || type == "gps")) {
+    fgRememberRequest(cached, frame, length, millis());
+  }
   return permitted;
 }
 

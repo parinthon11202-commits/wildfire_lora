@@ -33,6 +33,11 @@ void sendCommandAckPacket(const String &commandId, bool accepted, const String &
   String payload;
   serializeJson(doc, payload);
 #if SECURE_LORA_ENABLED
+  const size_t frameLength = payload.length() + FG_HEADER + FG_TAG;
+  if (remainingRadioCycleMs() < radioExchangeCostMs(frameLength, false)) {
+    Serial.println("Command ACK deferred: cycle deadline reached");
+    return;
+  }
   transmitSecurePayload(payload);
 #else
   LoRa.idle();
@@ -81,6 +86,10 @@ bool listenForGatewayCommand(bool waitForSensorAck) {
   bool secureReplySeen = false;
   bool gatewayReplyCompleted = false;
 #endif
+  if (remainingRadioCycleMs() < COMMAND_RX_WINDOW_MS) {
+    if (loraReady) LoRa.sleep();
+    return false;
+  }
   LoRa.receive();
 
   while (millis() - startedAt < COMMAND_RX_WINDOW_MS) {

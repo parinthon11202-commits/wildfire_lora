@@ -99,7 +99,9 @@ function decryptUplink(encoded, key) {
     const plaintext = Buffer.concat([
       decipher.update(info.frame.subarray(HEADER_BYTES, -TAG_BYTES)), decipher.final()
     ]);
-    packet = JSON.parse(plaintext.toString('utf8'));
+    packet = plaintext[0] === 1
+      ? decodeCompactSensor(plaintext, info.nodeId)
+      : JSON.parse(plaintext.toString('utf8'));
   } catch {
     throw failure('invalid node authentication', 401);
   }
@@ -107,6 +109,28 @@ function decryptUplink(encoded, key) {
     throw failure('node identity does not match frame', 401);
   }
   return { ...info, packet };
+}
+
+function decodeCompactSensor(bytes, nodeId) {
+  const states = ['NORMAL', 'WATCH', 'WARNING', 'SENSOR_FAULT'];
+  if (bytes.length !== 10 || bytes[0] !== 1 || bytes[1] >= states.length) {
+    throw failure('invalid compact sensor packet');
+  }
+  const temperature = bytes.readInt16BE(4);
+  const humidity = bytes.readUInt16BE(6);
+  const adc = bytes.readUInt16BE(8);
+  const packet = {
+    t: 's', id: nodeId, ri: bytes.readUInt16BE(2), st: states[bytes[1]],
+    at: temperature === -32768 ? null : temperature / 100,
+    h: humidity === 65535 ? null : humidity / 100,
+    adc: adc === 65535 ? null : adc
+  };
+  if (!packet.ri || (adc !== 65535 && adc > 4095) ||
+      (packet.st !== 'SENSOR_FAULT' && (packet.at === null || packet.h === null ||
+       packet.adc === null || packet.at < -20 || packet.at > 85 || packet.h > 100))) {
+    throw failure('invalid compact sensor values');
+  }
+  return packet;
 }
 
 function validatePacket(packet) {
@@ -136,6 +160,6 @@ function validatePacket(packet) {
 }
 
 module.exports = {
-  decryptUplink, failure, hexBytes, inspectFrame, nodeIdForSlot, openDeviceKey,
+  decodeCompactSensor, decryptUplink, failure, hexBytes, inspectFrame, nodeIdForSlot, openDeviceKey,
   provisionProof, registryKey, sealDeviceKey, slotForNodeId, validProof, validatePacket
 };

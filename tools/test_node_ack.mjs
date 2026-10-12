@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { compileWasm } from './compile_wasm.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const compiler = process.env.CLANGXX || 'C:/Users/14tha/AppData/Local/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe'
@@ -35,6 +35,7 @@ bool loraReady = true, lastCommandAccepted = true;
 String lastCommandResultReason, lastHandledCommandId;
 unsigned long millis() { return nowMs; }
 void delay(unsigned long duration) { nowMs += duration; }
+unsigned remainingRadioCycleMs() { return scenario == 14 ? 5999 : 300000; }
 struct Radio {
   void receive() {}
   int parsePacket() {
@@ -99,9 +100,7 @@ extern "C" int sendTime() { return sentAt; }
 const input = resolve(output, 'ack.cpp')
 const binary = resolve(output, 'ack.wasm')
 writeFileSync(input, cpp)
-const compiled = spawnSync(compiler, ['--target=wasm32', '-O2', '-nostdlib',
-  '-Wl,--no-entry', '-Wl,--export-all', input, '-o', binary], { encoding: 'utf8' })
-assert.equal(compiled.status, 0, compiled.error?.message || compiled.stderr)
+compileWasm(compiler, input, binary)
 const { instance } = await WebAssembly.instantiate(readFileSync(binary))
 const api = instance.exports
 const run = (scenario, requireAck = 1, wrap = 0) => {
@@ -130,4 +129,5 @@ assert.equal(run(12), 1); assert.equal(api.elapsed(), 5998, 'ACK just before dea
 assert.equal(run(13), 0); assert.equal(api.elapsed(), 6000, 'ACK at/after deadline is not accepted')
 assert.equal(run(1, 1, 1), 1); assert.equal(api.elapsed(), 1000, 'Timer rollover preserves early exit')
 assert.equal(run(0, 1, 1), 0); assert.equal(api.elapsed(), 6000, 'Timer rollover preserves timeout')
+assert.equal(run(14), 0); assert.equal(api.elapsed(), 0, 'Insufficient cycle budget does not start a shortened RX window')
 console.log('FG1 C++ ACK loop: early exit, 6s timeout, invalid frames, attached commands, GPS and timer rollover passed.')

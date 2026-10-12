@@ -22,6 +22,7 @@ bool initLoRa() {
   LoRa.setCodingRate4(LORA_CODING_RATE_DENOMINATOR);
   LoRa.setSyncWord(LORA_SYNC_WORD);
   LoRa.setTxPower(LORA_TX_POWER_DBM);
+  LoRa.setPreambleLength(8);
   LoRa.enableCrc();
   LoRa.receive();
 

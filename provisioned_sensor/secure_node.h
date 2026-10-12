@@ -140,21 +140,33 @@ bool nextSecureSequence(uint64_t &sequence) {
   return true;
 }
 
-bool transmitSecurePayload(const String &payload) {
+size_t prepareSecurePayload(const uint8_t *payload, size_t payloadLength, uint8_t *frame) {
   uint64_t sequence;
-  if (!nextSecureSequence(sequence)) { Serial.println("TX blocked: counter storage failed"); return false; }
+  if (!nextSecureSequence(sequence)) { Serial.println("TX blocked: counter storage failed"); return 0; }
   FgFrameInfo info = {};
   info.slot = secureIdentity.slot;
   memcpy(info.generation, secureIdentity.generation, 8);
   info.sequence = sequence;
-  uint8_t frame[FG_MAX_FRAME];
-  size_t length = fgEncrypt(payload, secureIdentity.key, info, "FGU1", frame);
-  if (!length) { Serial.println("TX blocked: packet too large or encryption failed"); return false; }
+  size_t length = fgEncryptBytes(payload, payloadLength, secureIdentity.key, info, "FGU1", frame);
+  if (!length) { Serial.println("TX blocked: packet too large or encryption failed"); return 0; }
   secureCurrentSequence = sequence;
+  return length;
+}
+
+bool transmitPreparedSecureFrame(const uint8_t *frame, size_t length) {
+  FgFrameInfo info;
+  if (!fgInspect(frame, length, "FGU1", info)) return false;
+  secureCurrentSequence = info.sequence;
   LoRa.idle();
   LoRa.beginPacket();
   LoRa.write(frame, length);
   return LoRa.endPacket();
+}
+
+bool transmitSecurePayload(const String &payload) {
+  uint8_t frame[FG_MAX_FRAME];
+  const size_t length = prepareSecurePayload((const uint8_t *)payload.c_str(), payload.length(), frame);
+  return length && transmitPreparedSecureFrame(frame, length);
 }
 
 bool receiveSecureReply(String &payload) {
@@ -166,7 +178,32 @@ bool receiveSecureReply(String &payload) {
     frame[length++] = value;
   }
   FgFrameInfo info;
-  return fgDecrypt(frame, length, secureIdentity.key, "FGD1", info, payload) &&
-    info.slot == secureIdentity.slot && info.sequence == secureCurrentSequence &&
-    !memcmp(info.generation, secureIdentity.generation, 8);
+  uint8_t plaintext[FG_MAX_FRAME] = {};
+  size_t plaintextLength = 0;
+  if (!fgDecryptBytes(frame, length, secureIdentity.key, "FGD1", info, plaintext, plaintextLength) ||
+      info.slot != secureIdentity.slot || info.sequence != secureCurrentSequence ||
+      memcmp(info.generation, secureIdentity.generation, 8)) return false;
+  if (plaintext[0] == FG_REPLY_KIND) {
+    if (plaintextLength < FG_REPLY_BYTES || plaintext[1] > 1 || plaintext[2] > 1 ||
+        (plaintext[2] == 0 && plaintextLength != FG_REPLY_BYTES) ||
+        (plaintext[2] == 1 && plaintextLength == FG_REPLY_BYTES)) return false;
+    StaticJsonDocument<COMMAND_MAX_JSON_SIZE> doc;
+    if (plaintext[2] == 1) {
+      if (deserializeJson(doc, plaintext + FG_REPLY_BYTES, plaintextLength - FG_REPLY_BYTES)) return false;
+      String command = String((const char *)(doc["cmd"] | ""));
+      if ((command != "gps_reacquire" && command != "gps_manual") ||
+          String((const char *)(doc["cid"] | "")).length() == 0) return false;
+    }
+    doc["t"] = "reply";
+    doc["id"] = secureNodeId;
+    doc["a"] = plaintext[1];
+    payload = "";
+    serializeJson(doc, payload);
+    return !doc.overflowed();
+  }
+  // Backward-compatible authenticated JSON replies only; never raw radio data.
+  if (memchr(plaintext, 0, plaintextLength)) return false;
+  plaintext[plaintextLength] = 0;
+  payload = String((const char *)plaintext);
+  return true;
 }

@@ -1,41 +1,41 @@
 {
-  "protocol": "FG1",
-  "board_fqbn": "esp32:esp32:ttgo-lora32:FlashFreq=40",
-  "name": "ForestGuard FG1 LILYGO LoRa32 433",
-  "version": "1.1.1",
   "builds": [
     {
       "chipFamily": "ESP32",
       "parts": [
         {
           "offset": 4096,
-          "md5": "b17faac68f1025f91ea1fef201346813",
-          "size": 23712,
+          "path": "node-bootloader.bin",
           "sha256": "0531e25dd0a0bfcc7db9ed296689f72dd47ce458b09cff088dc750d1ade08468",
-          "path": "node-bootloader.bin"
+          "size": 23712,
+          "md5": "b17faac68f1025f91ea1fef201346813"
         },
         {
           "offset": 32768,
-          "md5": "a039c66cd3488176037b616b7595fe72",
-          "size": 3072,
+          "path": "node-partitions.bin",
           "sha256": "148b959cbff1c38aa8e1d5c0ba9d612c54997b945e56a63f41223eef650653a1",
-          "path": "node-partitions.bin"
+          "size": 3072,
+          "md5": "a039c66cd3488176037b616b7595fe72"
         },
         {
           "offset": 57344,
-          "md5": "e6327541e2dc394ca2c3b3280ac0f39f",
-          "size": 8192,
+          "path": "node-boot-app.bin",
           "sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0",
-          "path": "node-boot-app.bin"
+          "size": 8192,
+          "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "offset": 65536,
-          "md5": "e76911067b8bc24439b60aa74177f712",
-          "size": 978736,
-          "sha256": "2599deb618eb0470396febd2a77cbe8dbe8cea6a841c6236e4c5f7dce220193c",
-          "path": "node-app.bin"
+          "path": "node-app.bin",
+          "sha256": "e758e4f33f1559afeb3f2338fb4f7dc5c20c9e938939f9f9edc12ce5d1623ac1",
+          "size": 981856,
+          "md5": "98c9d24203449a062305d72389f89272"
         }
       ]
     }
-  ]
+  ],
+  "protocol": "FG1",
+  "version": "1.2.1",
+  "board_fqbn": "esp32:esp32:ttgo-lora32:FlashFreq=40",
+  "name": "ForestGuard FG1 LILYGO LoRa32 433"
 }

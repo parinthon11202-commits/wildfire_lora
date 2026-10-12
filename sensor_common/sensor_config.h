@@ -47,7 +47,7 @@
 #define LORA_DIO0  26
 
 // ค่า SF ของ LoRa; ใช้ร่วมกับ bandwidth กำหนดรูปแบบสัญญาณและเวลาส่ง ต้องสอดคล้องกับตัวรับ
-#define LORA_SPREADING_FACTOR 12
+#define LORA_SPREADING_FACTOR 10
 // ความกว้างแถบสัญญาณหน่วย Hz; 125E3 คือ 125 kHz ต้องตรงกับตัวรับ
 #define LORA_SIGNAL_BANDWIDTH 125E3
 // ตัวส่วนอัตรารหัสแก้ข้อผิดพลาด; 5 หมายถึง 4/5
@@ -62,7 +62,12 @@
 // เวลาหน่วงสุ่มต่ำสุดก่อนส่ง เพื่อลดการส่งชนกันของหลายโหนด
 #define RANDOM_TX_DELAY_MIN_MS 0
 // เวลาหน่วงสุ่มสูงสุดก่อนส่ง หน่วย ms; การสุ่มช่วยลดแต่ไม่รับประกันว่าไม่ชน
-#define RANDOM_TX_DELAY_MAX_MS 5000
+#define RANDOM_TX_DELAY_MAX_MS 10000
+// Independent random backoff on retries; bounded again by the cycle deadline.
+#define RANDOM_RETRY_DELAY_MAX_MS 3000
+#define SENSOR_TX_MAX_ATTEMPTS 3
+// Reserve worst-case cmd_ack airtime plus processing before accepting an exchange.
+#define RADIO_PROCESSING_GUARD_MS 250UL
 
 // เปิดรับช่วงสั้นหลังส่งข้อมูลแต่ละครั้ง เพื่อให้เกตเวย์ส่งคำสั่งที่รออยู่มายังโหนดได้
 // เปิดรับ ACK/คำสั่งหลังส่งนานเท่านี้ ms; สั้นไปอาจพลาดคำตอบ ยาวขึ้นใช้เวลาตื่นมากขึ้น

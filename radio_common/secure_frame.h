@@ -2,10 +2,12 @@
 #include <Arduino.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/md.h>
+#include "compact_packets.h"
 
 // FG1 wire layout: direction[4], slot[1], generation[8], sequence BE[8], ciphertext, tag[16].
 // Nonce = direction[4] + sequence[8]. Uplink counter never repeats for a key.
-// Exactly ONE downlink reply per uplink: different nonce domain FGD1, same sequence.
+// ONE downlink ciphertext per uplink; retries retransmit its identical bytes.
+// Downlink uses a different nonce domain FGD1 with the same sequence.
 // ponytail: one trusted gateway only; multiple gateways require separate downlink key/nonce domains.
 constexpr size_t FG_HEADER = 21;
 constexpr size_t FG_TAG = 16;
@@ -58,9 +60,9 @@ bool fgInspect(const uint8_t *frame, size_t length, const char *direction, FgFra
   return info.sequence > 0 && info.sequence <= FG_MAX_SEQUENCE;
 }
 
-size_t fgEncrypt(const String &payload, const uint8_t *key, const FgFrameInfo &info,
-                 const char *direction, uint8_t *frame) {
-  if (payload.length() == 0 || payload.length() > FG_MAX_FRAME - FG_HEADER - FG_TAG ||
+size_t fgEncryptBytes(const uint8_t *payload, size_t payloadLength, const uint8_t *key,
+                      const FgFrameInfo &info, const char *direction, uint8_t *frame) {
+  if (payloadLength == 0 || payloadLength > FG_MAX_FRAME - FG_HEADER - FG_TAG ||
       info.slot < 1 || info.slot > 10 || info.sequence == 0 || info.sequence > FG_MAX_SEQUENCE) return 0;
   memcpy(frame, direction, 4);
   frame[4] = info.slot;
@@ -72,28 +74,39 @@ size_t fgEncrypt(const String &payload, const uint8_t *key, const FgFrameInfo &i
   mbedtls_gcm_context ctx;
   mbedtls_gcm_init(&ctx);
   int result = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, 256);
-  if (!result) result = mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, payload.length(),
-    nonce, sizeof(nonce), frame, FG_HEADER, (const uint8_t *)payload.c_str(), frame + FG_HEADER,
-    FG_TAG, frame + FG_HEADER + payload.length());
+  if (!result) result = mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, payloadLength,
+    nonce, sizeof(nonce), frame, FG_HEADER, payload, frame + FG_HEADER,
+    FG_TAG, frame + FG_HEADER + payloadLength);
   mbedtls_gcm_free(&ctx);
-  return result == 0 ? FG_HEADER + payload.length() + FG_TAG : 0;
+  return result == 0 ? FG_HEADER + payloadLength + FG_TAG : 0;
 }
 
-bool fgDecrypt(const uint8_t *frame, size_t length, const uint8_t *key,
-               const char *direction, FgFrameInfo &info, String &payload) {
+size_t fgEncrypt(const String &payload, const uint8_t *key, const FgFrameInfo &info,
+                 const char *direction, uint8_t *frame) {
+  return fgEncryptBytes((const uint8_t *)payload.c_str(), payload.length(), key, info, direction, frame);
+}
+
+bool fgDecryptBytes(const uint8_t *frame, size_t length, const uint8_t *key,
+                    const char *direction, FgFrameInfo &info, uint8_t *plaintext, size_t &plaintextLength) {
   if (!fgInspect(frame, length, direction, info)) return false;
-  const size_t plaintextLength = length - FG_HEADER - FG_TAG;
+  plaintextLength = length - FG_HEADER - FG_TAG;
   uint8_t nonce[12];
   memcpy(nonce, frame, 4);
   memcpy(nonce + 4, frame + 13, 8);
-  uint8_t plaintext[FG_MAX_FRAME] = {};
   mbedtls_gcm_context ctx;
   mbedtls_gcm_init(&ctx);
   int result = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, 256);
   if (!result) result = mbedtls_gcm_auth_decrypt(&ctx, plaintextLength, nonce, sizeof(nonce),
     frame, FG_HEADER, frame + length - FG_TAG, FG_TAG, frame + FG_HEADER, plaintext);
   mbedtls_gcm_free(&ctx);
-  if (result) return false;
+  return result == 0;
+}
+
+bool fgDecrypt(const uint8_t *frame, size_t length, const uint8_t *key,
+               const char *direction, FgFrameInfo &info, String &payload) {
+  uint8_t plaintext[FG_MAX_FRAME] = {};
+  size_t plaintextLength = 0;
+  if (!fgDecryptBytes(frame, length, key, direction, info, plaintext, plaintextLength)) return false;
   // JSON may not contain embedded NUL bytes.
   if (memchr(plaintext, 0, plaintextLength)) return false;
   plaintext[plaintextLength] = 0;

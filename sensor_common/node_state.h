@@ -73,3 +73,7 @@ unsigned long lastLoRaInitAttemptMs = 0;
 bool loraReady = false;
 bool lastCommandAccepted = true;
 String lastCommandResultReason;
+// Set once before any sensor/GPS/command transmission in this measurement cycle.
+uint32_t radioCycleStartedMs = 0;
+uint32_t radioCycleBudgetMs = 0;
+bool radioDeadlineLogged = false;

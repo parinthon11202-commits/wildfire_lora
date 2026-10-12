@@ -25,6 +25,15 @@ void handleIncomingLoRa() {
   if (deserializeJson(packet, payload)) { LoRa.receive(); return; }
   String type = String((const char *)(packet["t"] | ""));
   String nodeId = fgNodeId(info.slot);
+  FgReplyCache &cached = fgReplyCaches[info.slot - 1];
+  const bool exchange = type == "s" || type == "gps";
+  if (exchange && cached.queued && fgCachedRequestMatches(cached, frame, length, millis())) {
+    if (cached.replyLength) resendCachedReply(info.slot);
+    else sendSecureReplyForNode(nodeId, info, device, type == "s");
+    Serial.print("Duplicate uplink: cached ACK only: "); Serial.println(nodeId);
+    LoRa.receive();
+    return;
+  }
   StaticJsonDocument<MAX_JSON_SIZE + 256> upload;
   upload["frame"] = fgBase64(frame, length);
   upload["rssi"] = rssi;
@@ -35,7 +44,8 @@ void handleIncomingLoRa() {
 #if WIFI_HTTP_ENABLED
   queued = enqueuePacketForBackend(body);
 #endif
-  if (queued && (type == "s" || type == "gps")) {
+  if (queued && exchange) {
+    cached.queued = true;
     sendSecureReplyForNode(nodeId, info, device, type == "s");
   }
   if (queued && type == "cmd_ack") {

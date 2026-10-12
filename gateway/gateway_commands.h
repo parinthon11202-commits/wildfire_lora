@@ -196,19 +196,30 @@ bool sendSecureReplyForNode(const String &nodeId, const FgFrameInfo &info,
     break;
   }
   unlockPendingCommands();
+  // Normal reply is exactly three plaintext bytes; optional command JSON follows.
+  uint8_t payload[FG_MAX_FRAME - FG_HEADER - FG_TAG] = {FG_REPLY_KIND, (uint8_t)(sensorAck ? 1 : 0), 0};
+  size_t payloadLength = FG_REPLY_BYTES;
   StaticJsonDocument<MAX_JSON_SIZE> doc;
-  doc["t"] = "reply";
-  doc["id"] = nodeId;
-  doc["a"] = sensorAck ? 1 : 0;
   if (commandId.length() > 0) {
     doc["cmd"] = commandName;
     doc["cid"] = commandId;
   }
-  String payload;
-  serializeJson(doc, payload);
+  if (commandId.length() > 0) {
+    String commandJson;
+    serializeJson(doc, commandJson);
+    if (!doc.overflowed() && commandJson.length() <= sizeof(payload) - FG_REPLY_BYTES) {
+      payload[2] = 1;
+      memcpy(payload + FG_REPLY_BYTES, commandJson.c_str(), commandJson.length());
+      payloadLength += commandJson.length();
+    } else commandId = ""; // Send ACK now; keep an oversized command pending.
+  }
   uint8_t frame[FG_MAX_FRAME];
-  size_t length = fgEncrypt(payload, device.key, info, "FGD1", frame);
+  size_t length = fgEncryptBytes(payload, payloadLength, device.key, info, "FGD1", frame);
   if (!length) return false;
+  // Save BEFORE radio TX, including when endPacket fails or its ACK is lost.
+  FgReplyCache &cached = fgReplyCaches[info.slot - 1];
+  memcpy(cached.reply, frame, length);
+  cached.replyLength = length;
 
   LoRa.idle();
   LoRa.beginPacket();
@@ -227,4 +238,15 @@ bool sendSecureReplyForNode(const String &nodeId, const FgFrameInfo &info,
     Serial.println(commandId);
   }
   return true;
+}
+
+bool resendCachedReply(uint8_t slot) {
+  FgReplyCache &cached = fgReplyCaches[slot - 1];
+  if (!cached.replyLength) return false;
+  LoRa.idle();
+  LoRa.beginPacket();
+  LoRa.write(cached.reply, cached.replyLength);
+  const bool sent = LoRa.endPacket();
+  LoRa.receive();
+  return sent;
 }

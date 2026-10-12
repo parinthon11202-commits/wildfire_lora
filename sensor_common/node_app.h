@@ -8,8 +8,12 @@
 
 // sendMeasurement: วัดหนึ่งรอบแล้วส่งค่าที่วัดได้พร้อมสถานะทันที
 void sendMeasurement(const SensorData &current, FireStatus status) {
+#if SECURE_LORA_ENABLED
+  sendCompactMeasurement(current, status);
+#else
   String payload = buildJsonPacket(current, status);
   sendLoRaPacket(payload, true, true);
+#endif
 }
 
 // runOneMeasurementCycle: อ่าน → ตัดสินจากเกณฑ์ → ส่งทันที → รอหรือหลับจนถึงรอบถัดไป
@@ -17,6 +21,9 @@ void runOneMeasurementCycle() {
   unsigned long cycleStartedMs = millis();
   SensorData current = readSensors();
   FireStatus status = evaluateFireStatus(current);
+  radioCycleStartedMs = cycleStartedMs;
+  radioCycleBudgetMs = plannedReportIntervalSeconds(status) * 1000UL;
+  radioDeadlineLogged = false;
 
   printSensorDebug(current, status);
   sendMeasurement(current, status);
@@ -44,6 +51,7 @@ void setupNode() {
   Serial.begin(115200);
   delay(1000);
 #if SECURE_LORA_ENABLED
+  Serial.println("FG1_COMPACT_SF10");
   setupSecureNode();
 #endif
 
