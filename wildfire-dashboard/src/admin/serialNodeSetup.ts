@@ -61,7 +61,7 @@ export async function registerNodeThroughUsb(slot: number, replace: boolean, onP
       throw new Error('ติดตั้งโปรแกรมแล้ว แต่บอร์ดยังไม่ตอบ FG1_READY ตรวจรุ่นบอร์ดและกดเพิ่มโหนดเพื่อลองใหม่')
     })
     setupReady = true
-    onProgress('ลงทะเบียนเลขโหนดและสร้างกุญแจเฉพาะเครื่อง…')
+    onProgress('ลงทะเบียนเลขโหนดด้วยกุญแจที่เตรียมไว้…')
     const registration = await adminJson<Registration>('/devices', {
       method: 'POST', body: JSON.stringify({ slot, replace }),
     })

@@ -9,6 +9,7 @@ const {
   failure, nodeIdForSlot, slotForNodeId, registryKey, sealDeviceKey,
   openDeviceKey, provisionProof, validProof
 } = require('../services/secureLoRa');
+const { preparedCredentialForSlot } = require('../services/preparedNodeCredentials');
 
 const router = express.Router();
 router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -56,15 +57,17 @@ router.post('/', async (req, res, next) => {
       throw failure('replace must be a boolean');
     }
     registryKey();
-    const existing = await NodeModel.findOne({ node_id: nodeId });
+    const existing = await NodeModel.findOne({ node_id: nodeId }).select('+used_prepared_generations');
     const now = new Date();
     const occupied = existing && existing.registration_status !== 'archived' &&
       !(existing.registration_status === 'pending' && existing.provisioning_expires_at <= now);
     if (occupied && req.body.replace !== true) {
       throw failure(`${nodeId} ถูกใช้งานอยู่แล้ว เลือกติดตั้งใหม่หากต้องการเปลี่ยนบอร์ด`, 409);
     }
-    const generation = crypto.randomBytes(8).toString('hex');
-    const key = crypto.randomBytes(32).toString('hex');
+    const { generation, key } = preparedCredentialForSlot(req.body.slot);
+    if (existing?.used_prepared_generations?.includes(generation)) {
+      throw failure(`${nodeId} ใช้กุญแจชุดนี้ไปแล้ว ต้องเตรียมกุญแจชุดใหม่ก่อนติดตั้งอีกครั้ง`, 409);
+    }
     const challenge = crypto.randomBytes(16).toString('hex');
     const expires = new Date(now.getTime() + 10 * 60 * 1000);
     const fields = {
@@ -115,6 +118,7 @@ router.post('/:node_id/activate', async (req, res, next) => {
     if (!validProof(req.body?.proof, expected)) throw failure('บอร์ดยืนยันการตั้งค่าไม่สำเร็จ', 401);
     const activated = await NodeModel.findOneAndUpdate(filter, {
       $set: { registration_status: 'active' },
+      $addToSet: { used_prepared_generations: req.body.generation },
       $unset: { provisioning_challenge: '', provisioning_expires_at: '' }
     }, { new: true });
     if (!activated) throw failure('การลงทะเบียนถูกเปลี่ยนแปลง กรุณาโหลดใหม่', 409);

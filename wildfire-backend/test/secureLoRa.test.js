@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const {
   decryptUplink, inspectFrame, nodeIdForSlot, openDeviceKey, provisionProof,
   sealDeviceKey, slotForNodeId, validProof
@@ -136,12 +139,23 @@ test('soft delete revokes credentials without deleting node or history, restore 
   const Command = require('../src/models/Command');
   const original = { find: NodeModel.findOne, update: NodeModel.findOneAndUpdate, commands: Command.updateMany };
   const previousKey = process.env.DEVICE_REGISTRY_KEY;
+  const previousFile = process.env.NODE_CREDENTIALS_FILE;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fg1-prepared-'));
+  process.env.NODE_CREDENTIALS_FILE = path.join(directory, 'nodes.json');
+  fs.writeFileSync(process.env.NODE_CREDENTIALS_FILE, JSON.stringify({
+    protocol: 'FG1',
+    nodes: Array.from({ length: 10 }, (_, index) => ({
+      node_id: `NODE${String(index + 1).padStart(2, '0')}`,
+      generation: String(index + 1).padStart(16, '0'),
+      key: String(index + 1).padStart(64, '0'),
+    })),
+  }));
   process.env.DEVICE_REGISTRY_KEY = '22'.repeat(32);
   const existing = { _id: 'same-logical-id', node_id: 'NODE01', registration_status: 'active',
     credential_generation: GENERATION, updated_at: new Date(0) };
   const updates = [];
   const commands = [];
-  NodeModel.findOne = async () => existing;
+  NodeModel.findOne = () => ({ select: async () => existing });
   NodeModel.findOneAndUpdate = async (filter, update) => {
     updates.push({ filter, update });
     return { ...existing };
@@ -164,12 +178,19 @@ test('soft delete revokes credentials without deleting node or history, restore 
     assert.equal(updates[1].update.$set.registration_status, 'pending');
     assert.ok(Object.hasOwn(updates[1].update.$unset, 'last_seen'));
     assert.equal(response.body.node_id, 'NODE01');
-    assert.notEqual(response.body.generation, GENERATION);
+    assert.equal(response.body.generation, '0000000000000001');
+    assert.equal(response.body.key, '0000000000000000000000000000000000000000000000000000000000000001');
     assert.equal(response.body.restored, true);
+    existing.used_prepared_generations = [response.body.generation];
+    await assert.rejects(handler('post', '/')({ body: { slot: 1, replace: true } }, response, fail),
+      /ใช้กุญแจชุดนี้ไปแล้ว/);
   } finally {
     NodeModel.findOne = original.find;
     NodeModel.findOneAndUpdate = original.update;
     Command.updateMany = original.commands;
+    if (previousFile === undefined) delete process.env.NODE_CREDENTIALS_FILE;
+    else process.env.NODE_CREDENTIALS_FILE = previousFile;
+    fs.rmSync(directory, { recursive: true, force: true });
     if (previousKey === undefined) delete process.env.DEVICE_REGISTRY_KEY;
     else process.env.DEVICE_REGISTRY_KEY = previousKey;
   }

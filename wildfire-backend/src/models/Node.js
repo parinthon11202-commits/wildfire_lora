@@ -10,6 +10,8 @@ const nodeSchema = new mongoose.Schema(
       type: String, enum: ['legacy', 'pending', 'active', 'archived'], default: 'legacy'
     },
     credential_generation: { type: String },
+    // Remember every activated preassigned credential, including after delete/restore.
+    used_prepared_generations: { type: [String], default: [], select: false },
     credential_ciphertext: { type: String, select: false },
     provisioning_challenge: { type: String, select: false },
     provisioning_expires_at: { type: Date },

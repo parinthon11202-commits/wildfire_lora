@@ -1,5 +1,37 @@
 # FG1: ใช้บอร์ดเดิม เพิ่มการยืนยันตัวตนและจัดการ NODE01–NODE10
 
+สถานะ 14 ตุลาคม 2569: VM ใช้ Backend image `forestguard-backend:prepared-20261014-1520`
+และ mount ไฟล์กุญแจส่วนตัวเป็น Compose secret ที่ `/run/secrets/node_credentials` แล้ว
+ตรวจ public health ว่า `node_registration_configured: true`, Gateway ติดต่อ Backend ได้,
+firmware manifest HTTP 200 และ Admin ยัง redirect ไป Cloudflare Access
+MongoDB container เดิมไม่ถูกเปลี่ยน; ยังไม่ได้ติดตั้ง/ลงทะเบียนบอร์ดจริงด้วยกุญแจชุดนี้
+release ก่อนหน้าเก็บไว้ที่ `/home/azureuser/forestguard-releases/current-before-prepared-20261014-1520`
+
+## เตรียมกุญแจ NODE01–NODE10 ไว้ก่อนติดตั้งบอร์ด
+
+ในโครงการเวอร์ชันนี้ Backend อ่าน `generation` และ `key` ของแต่ละโหนดจากไฟล์
+`wildfire-backend/node-credentials.local.json` แทนการสุ่มใหม่เมื่อกดลงทะเบียน
+สร้างไฟล์ครั้งเดียวจากโฟลเดอร์ `wildfire-backend` ด้วย
+`node scripts/prepare-node-credentials.js` แล้วเปิดไฟล์เพื่อดู NODE01–NODE10 และกุญแจจริง
+ไฟล์นี้เป็นข้อมูลลับแบบอ่านได้ จึงอยู่ใน `.gitignore`; เก็บสำเนาที่ปลอดภัยแยกต่างหาก
+และไม่ส่งไฟล์นี้ขึ้นเว็บ Dashboard หรือใส่ใน Docker image
+
+เครื่อง Backend ต้องเข้าถึงไฟล์เดียวกันก่อนกดลงทะเบียน บนเครื่องพัฒนาใช้ path ข้างต้น
+ส่วน Docker ให้ mount ไฟล์แบบ read-only แล้วตั้ง `NODE_CREDENTIALS_FILE` เป็น path ภายใน container
+ยังต้องเก็บ `DEVICE_REGISTRY_KEY` เดิมสำหรับเข้ารหัสกุญแจใน MongoDB
+Backend บน VM ใช้ไฟล์ชุดนี้แล้ว แต่การติดตั้งบอร์ดแต่ละตัวต้องทำผ่าน USB ในหน้า Admin
+
+เมื่อกดปุ่มในหน้า Admin ระบบใช้กุญแจของ NODE แถวนั้นจากไฟล์ ส่งให้บอร์ดผ่าน USB
+แล้วเปิดใช้งานหลังตรวจ proof จากบอร์ด; สถานะ `pending` ยังไม่ใช่บอร์ดที่ใช้งานได้
+สำหรับ NODE01–NODE03 ที่เคยลงทะเบียน ต้องกด “ติดตั้งใหม่ / เปลี่ยนบอร์ด” หลัง Backend
+ใช้ไฟล์ชุดนี้แล้ว จึงจะตรงกับกุญแจใหม่ในไฟล์ ประวัติเดิมยังอยู่
+
+กุญแจชุดเดียวใช้เปิดใช้งานได้ครั้งเดียวเพื่อกันการใช้ AES-GCM nonce ซ้ำ
+หากต้องเปลี่ยนบอร์ดหรือลงทะเบียนใหม่ภายหลัง ให้รัน
+`node scripts/prepare-node-credentials.js NODE03` (เปลี่ยนเลขตามโหนด)
+แล้วนำไฟล์ฉบับใหม่ไปที่ Backend ก่อนกดติดตั้งอีกครั้ง
+อย่านำไฟล์เก่ากลับมาใช้หลังจากกุญแจในไฟล์เคยเปิดใช้งานแล้ว
+
 Backend compact และเว็บพร้อมเฟิร์มแวร์โหนด 1.2.1 deploy VM แล้ววันที่ 12 ตุลาคม 2569
 ตรวจ API HTTP 200, checksum เฟิร์มแวร์ทั้งสี่ไฟล์ และ Cloudflare Access หน้า Admin แล้ว
 ยังไม่ได้ flash โหนด/Gateway; การเปลี่ยนรอบ 60/40/20/60 วินาทีมีผลหลังติดตั้งเฟิร์มแวร์ใหม่บนโหนด
@@ -67,7 +99,8 @@ GPS / cmd_ack ยังเป็น JSON plaintext ไม่เกิน 218 byt
 Gateway ส่งเฟรมเดิมแบบ base64 ไป Backend พร้อม RSSI/SNR; Backend ตรวจ GCM ซ้ำเอง
 ไม่มี fallback รับ JSON ไม่ยืนยันตัวตน และไม่มี auto-upsert โหนดที่ไม่ลงทะเบียน
 
-key 32 bytes และ generation 8 bytes สุ่มใหม่เมื่อ register / replace / restore
+key 32 bytes และ generation 8 bytes เตรียมไว้ล่วงหน้าในไฟล์ของแต่ละ NODE
+เมื่อต้อง replace / restore หลังเปิดใช้งานแล้ว ต้องเตรียมคู่ใหม่ก่อนลงทะเบียน
 โหนด reserve counter เป็นช่วง 256 ก่อนส่ง บันทึกลง NVS แบบหนึ่ง blob และใช้ RTC ข้าม deep sleep
 cold reset ข้ามช่วงที่ reserve ไว้ จึงไม่ใช้ nonce เดิม; NVS เขียนไม่ได้จะไม่ส่ง
 Gateway เก็บ high-watermark ต่อ slot/generation ลง NVS ก่อน ACK และ Backend ใช้ atomic CAS ใน MongoDB

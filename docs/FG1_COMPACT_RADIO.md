@@ -90,7 +90,7 @@ Gateway build ที่ใช้ dummy secrets เป็น compile check เท
 เผยแพร่ node firmware รุ่น1.2.1ผ่าน publisher ซึ่งสำรอง binary เก่าใน .codex-build/firmware-releases
 ต้อง deploy Backend ที่รู้จัก compact ก่อน แล้วอัป Gateway และโหนดให้ใช้ SF10 ตรงกัน
 ถ้า flash รักษา partition/NVS ตาม installer เดิม ไม่ต้องลบประวัติหรือลงทะเบียนใหม่เพื่อเปลี่ยน SF
-การกดเพิ่ม/ติดตั้งใหม่ตามกระบวนการลงทะเบียนเดิมยังออก key/generation ใหม่ตามปกติ
+การกดเพิ่ม/ติดตั้งใหม่ใช้ key/generation ที่เตรียมไว้ในไฟล์ Backend; หากคู่เดิมเคยเปิดใช้งานแล้วต้องเตรียมคู่ใหม่ก่อน
 
 ผลตรวจ local วันที่ 12 ตุลาคม 2569: Backend 28/28, Dashboard 16/16, C++ risk/ACK/compact retry tests ผ่าน
 TypeScript และ production build ผ่าน; manifest 1.2.0/ทุก checksum/USB markers ตรวจผ่าน

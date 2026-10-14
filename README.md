@@ -6,6 +6,8 @@
 > ตรวจ API / ไฟล์เฟิร์มแวร์ผ่านโดเมนจริงแล้ว; ยังไม่ได้ flash โหนดหรือ Gateway ในรอบนี้
 > ปุ่มเพิ่ม/ติดตั้งโหนดใช้ไฟล์ใหม่ผ่าน USB; Gateway และโหนดต้องใช้ SF10 ตรงกัน
 > ดู [คู่มือ FG1](docs/FG1_ONBOARDING.md) สำหรับขั้นตอนที่เหลือและข้อจำกัด
+> กุญแจ NODE01–NODE10 สำหรับรอบติดตั้งใหม่เตรียมล่วงหน้าใน `wildfire-backend/node-credentials.local.json` (ไฟล์ส่วนตัว ไม่ขึ้น Git)
+> 14 ตุลาคม 2569: Backend บน VM ใช้ไฟล์กุญแจชุดนี้ผ่าน Compose secret แล้ว (`node_registration_configured: true`); ยังต้องติดตั้งบอร์ดจริงใหม่ทั้งสิบตัว
 > รูปแบบแพ็กเก็ตและนโยบายลองซ้ำ: [FG1 compact radio](docs/FG1_COMPACT_RADIO.md)
 > โหนด legacy ด้านล่างใช้กับ Gateway/Backend FG1 ไม่ได้ ต้องวางแผน migration ก่อน
 

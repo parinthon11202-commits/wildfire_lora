@@ -16,6 +16,12 @@ const { handlePacket } = require('./services/packetHandler');
 const { corsOptions, requireGatewayKey } = require('./middleware/security');
 const { gatewayStatus, markGatewayPacket } = require('./services/gatewayStatus');
 const { isTelegramConfigured } = require('./services/telegramService');
+const { preparedCredentials } = require('./services/preparedNodeCredentials');
+
+function nodeRegistrationConfigured() {
+  if (!/^[0-9a-f]{64}$/.test(process.env.DEVICE_REGISTRY_KEY || '')) return false;
+  try { preparedCredentials(); return true; } catch { return false; }
+}
 
 const app = express();
 const dashboardDirectory = path.resolve(__dirname, '../../wildfire-dashboard/dist');
@@ -35,7 +41,7 @@ app.get('/api/health', (req, res) => {
     service: 'wildfire-backend',
     api_version: 3,
     radio_protocol: 'FG1',
-    node_registration_configured: /^[0-9a-f]{64}$/.test(process.env.DEVICE_REGISTRY_KEY || ''),
+    node_registration_configured: nodeRegistrationConfigured(),
     ok: mongoReady,
     dashboard_served: dashboardAvailable,
     uptime_sec: Math.round(process.uptime()),

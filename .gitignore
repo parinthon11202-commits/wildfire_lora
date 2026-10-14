@@ -1,4 +1,6 @@
 gateway/secrets.h
+wildfire-backend/node-credentials.local.json
+.fg1-local/
 wildfire-dashboard/public/firmware/vendor/
 wildfire-dashboard/public/firmware/node-merged.bin
 wildfire-dashboard/public/firmware/node-*.bin
